@@ -1,41 +1,39 @@
-// Vercel serverless function for Stripe Checkout Sessions
-// Place this file in /api/create-checkout-session.js in your Vercel project
-// Your Stripe secret key must be set as an environment variable: STRIPE_SECRET_KEY
-
-
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 module.exports = async (req, res) => {
-  // Vercel expects the body to be parsed as JSON
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
   }
+
   try {
-    // Parse body if not already parsed (for local dev)
-    let body = req.body;
-    if (typeof body === 'string') {
-      body = JSON.parse(body);
+    const { cart, region } = req.body;
+
+    if (!cart || !Array.isArray(cart) || cart.length === 0) {
+      return res.status(400).json({ error: 'Cart is empty' });
     }
-    const { cart, region } = body;
-    if (!Array.isArray(cart) || !region) {
-      res.status(400).json({ error: 'Missing cart or region' });
-      return;
-    }
-    // Only allow Isle of Man (IM)
+
     if (region !== 'IM') {
-      res.status(400).json({ error: 'We only deliver to the Isle of Man.' });
-      return;
+      return res.status(400).json({ error: 'We only deliver to the Isle of Man.' });
     }
-    // Enforce max quantity per order
-    const maxQty = 15;
+
     let totalQty = 0;
-    cart.forEach(item => { totalQty += item.qty; });
-    if (totalQty > maxQty) {
-      res.status(400).json({ error: 'For bulk orders, please contact us directly.' });
-      return;
+    cart.forEach(item => totalQty += item.qty);
+    
+    if (totalQty > 15) {
+      return res.status(400).json({ error: 'Maximum 15 items per order' });
     }
-    // Map cart to Stripe line items
+
     const line_items = cart.map(item => ({
       price_data: {
         currency: 'gbp',
@@ -44,17 +42,27 @@ module.exports = async (req, res) => {
       },
       quantity: item.qty,
     }));
+
+    line_items.push({
+      price_data: {
+        currency: 'gbp',
+        product_data: { name: 'Delivery (Isle of Man)' },
+        unit_amount: 150,
+      },
+      quantity: 1,
+    });
+
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items,
       mode: 'payment',
-      success_url: 'https://manxbiltong.com/cart/index.html?success=true',
-      cancel_url: 'https://manxbiltong.com/cart/index.html?canceled=true',
+      success_url: 'https://manxbiltong.com/cart/?success=true',
+      cancel_url: 'https://manxbiltong.com/cart/?canceled=true',
       shipping_address_collection: { allowed_countries: ['IM'] },
-      metadata: { admin_email: 'orders@manxbiltong.com' },
     });
-    res.status(200).json({ id: session.id });
+
+    return res.status(200).json({ id: session.id });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   }
 };
