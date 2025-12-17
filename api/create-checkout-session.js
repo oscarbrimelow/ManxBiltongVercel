@@ -2,16 +2,26 @@
 // Place this file in /api/create-checkout-session.js in your Vercel project
 // Your Stripe secret key must be set as an environment variable: STRIPE_SECRET_KEY
 
+
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 
 module.exports = async (req, res) => {
+  // Vercel expects the body to be parsed as JSON
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method not allowed' });
     return;
   }
-
   try {
-    const { cart, region } = req.body;
+    // Parse body if not already parsed (for local dev)
+    let body = req.body;
+    if (typeof body === 'string') {
+      body = JSON.parse(body);
+    }
+    const { cart, region } = body;
+    if (!Array.isArray(cart) || !region) {
+      res.status(400).json({ error: 'Missing cart or region' });
+      return;
+    }
     // Only allow Isle of Man (IM)
     if (region !== 'IM') {
       res.status(400).json({ error: 'We only deliver to the Isle of Man.' });
